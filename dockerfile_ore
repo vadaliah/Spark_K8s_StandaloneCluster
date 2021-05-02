@@ -1,0 +1,89 @@
+FROM lballabio/boost:1.72.0-bionic
+
+# Add and configure required tools
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y python python-pip unzip \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+FROM ubuntu:latest
+#
+# Now install the needed packages.
+RUN apt-get -y update && apt-get install -y default-jdk python3
+RUN apt-get install -y python3-dev python3-pip
+RUN python3 -m pip install --upgrade pip
+RUN python3 -m pip install --upgrade pyspark
+
+# Note, I have added several other packages that provide networking utilities like
+# ping, nslookup, ifconfig etc.
+RUN apt-get -y update && apt-get install -y net-tools wget dnsutils iputils-ping iputils-tracepath iputils-arping iputils-clockdiff unzip
+
+
+RUN python3 -m pip install jupyter ipywidgets jupyter_dashboards pythreejs bqplot matplotlib scipy
+
+RUN jupyter dashboards quick-setup --sys-prefix
+RUN jupyter nbextension enable --py --sys-prefix widgetsnbextension
+
+
+# Download and uncompress ORE
+
+ARG ore_short_version=1.8
+ARG ore_version=1.8.0.7
+ARG ore_archive=ORE-${ore_short_version}.zip
+ARG ore_folder=ORE-${ore_short_version}
+
+ENV ore_version ${ore_version}
+
+RUN wget https://github.com/OpenSourceRisk/Engine/releases/download/v${ore_version}/${ore_archive} 
+
+RUN /usr/bin/unzip ${ore_archive} 
+RUN rm ${ore_archive}
+
+# Whatever we do next, we do in the ORE folder
+
+WORKDIR ${ore_folder}
+
+
+# Add QuantLib
+
+ARG quantlib_version=1.22
+ENV quantlib_version ${quantlib_version}
+
+RUN wget https://github.com/lballabio/QuantLib/releases/download/QuantLib-v${quantlib_version}/QuantLib-${quantlib_version}.tar.gz
+
+# COPY /home/cc/QuantLib-${quantlib_version}.tar.gz Quantlib
+
+RUN tar xfz ./QuantLib-${quantlib_version}.tar.gz 
+RUN rm QuantLib-${quantlib_version}.tar.gz 
+RUN mv QuantLib-${quantlib_version} QuantLib
+
+
+# Compile, as per instructions in the ORE user guide
+
+RUN apt-get install -y libboost-all-dev
+
+RUN cd QuantLib \
+    && ./configure \
+    && make -j4
+
+RUN cd QuantExt \
+    && ./configure \
+    && make -j4 \
+    && ./test/quantext-test-suite
+
+RUN cd OREData \
+    && ./configure \
+    && make -j4 \
+    && ./test/ored-test-suite
+
+RUN cd OREAnalytics \
+    && ./configure \
+    && make -j4 \
+    && ./test/orea-test-suite
+
+RUN cd App \
+    && ./configure \
+    && make -j4
+
+ENV LC_NUMERIC C
